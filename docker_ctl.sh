@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -x
 CFG_PATH=/var/run/docker/net/
 
 add_port () {
@@ -8,7 +8,7 @@ add_port () {
     INTERFACE=$3
     CONTAINER=$4
 
-    if [ -z $BRIDGE ] || [-z $TYPE] || [ -z $INTERFACE ] || [ -z $CONTAINER ]
+    if [ -z $BRIDGE ] || [ -z $TYPE ] || [ -z $INTERFACE ] || [ -z $CONTAINER ]
     then
         echo "add-port: not enough arguments (use --help for help)"
         exit 1
@@ -35,14 +35,14 @@ add_port () {
 
     if [ x$TYPE == "xovs" ]
     then
-        PORT=$(ovs_vsctl --data=bare --no-heading --columns=name find interface \
+        PORT=$(ovs-vsctl --data=bare --no-heading --columns=name find interface \
              external_ids:container_id=$CONTAINER external_ids:container_iface=$INTERFACE 2> /dev/null)
-        if [ -n $PORT ];
+        if [ ! -z $PORT ];
         then
             echo "Port '$INTERFACE' already exist"
             exit 1
         fi
-        ovs_vsctl add-br --may_exist $BRIDGE
+        ovs-vsctl --may-exist add-br $BRIDGE
     else
         brctl showmacs $BRIDGE
         if [ $? != 0 ]
@@ -74,10 +74,11 @@ add_port () {
 
     if [ x$TYPE == "xovs" ]
     then
-        ovs_vsctl --may-exist add-port $BRIDGE "$PORTNAME"_l -- set interface "$PORTNAME"_l \
+        ovs-vsctl --may-exist add-port $BRIDGE "$PORTNAME"_l -- set interface "$PORTNAME"_l \
         external_ids:container_id=$CONTAINER external_ids:container_iface=$INTERFACE
     else
         brctl addif $BRIDGE "$PORTNAME"_l
+    fi
     ip link set "$PORTNAME"_l up
 
     ip link set "$PORTNAME"_c netns $PID
@@ -100,7 +101,7 @@ add_port () {
     then
         ip netns exec $PID ip route add default via $GATEWAY
     fi
- 
+
     echo $BRIDGE,$TYPE,$INTERFACE,"$PORTNAME"_l,$ADDRESS,$GATEWAY >> $CFG_PATH$CID
 }
 
@@ -110,23 +111,32 @@ del_port () {
     INTERFACE=$3
     CONTAINER=$4
 
-    if [ -z $BRIDGE ] || [-z $TYPE] || [ -z $INTERFACE ] || [ -z $CONTAINER ]
+    if [ -z $BRIDGE ] || [ -z $TYPE ] || [ -z $INTERFACE ] || [ -z $CONTAINER ]
     then
         echo "del-port: not enough arguments (use --help for help)"
         exit 1
     fi
 
     CID=$(docker ps -a -f name=^/$CONTAINER$ --format {{.ID}})
-
+    if [ ${#CID} -eq 0 ]
+    then
+        echo "No such container '$CONTAINER'."
+        exit 1
+    fi
     OLD_IFS=$IFS
-    INFO=$(grep \'$BRIDGE:$TYPE,$INTERFACE\' $CFG_PATH$CID)
+    INFO=$(grep $BRIDGE,$TYPE,$INTERFACE $CFG_PATH$CID)
+    if [ ${#INFO} -eq 0 ]
+    then
+        echo "Cannot find device '$INTERFACE' in container."
+        exit 1
+    fi
     IFS=","
     arr=($INFO)
-    PORT=${arr[2]}
+    PORT=${arr[3]}
     IFS=$OLD_IFS
     if [ x$TYPE == "xovs" ]
     then
-        ovs_vsctl --if-exists del-port $BRIDGE $PORT > /dev/null
+        ovs-vsctl --if-exists del-port $BRIDGE $PORT > /dev/null
     else
         brctl delif $BRIDGE $PORT > /dev/null
     fi
@@ -165,7 +175,7 @@ clear () {
                 arr=($line)
                 if [ x${arr[1]} == "xovs" ]
                 then
-                    ovs_vsctl --if-exists del-port ${arr[0]} ${arr[3]} > /dev/null
+                    ovs-vsctl --if-exists del-port ${arr[0]} ${arr[3]} > /dev/null
                 else
                     brctl delif ${arr[0]} ${arr[3]} > /dev/null
                 fi
@@ -189,6 +199,7 @@ clear () {
                 del_port ${arr[0]} ${arr[1]} ${arr[2]} $1
                 IFS=$OLD_IFS
             done
+            rm -f $CFG_PATH$CID
         fi
     done
 }
@@ -199,7 +210,7 @@ ${UTIL}: Performs integration of Open vSwitch with Docker.
 usage: ${UTIL} COMMAND
 
 Commands:
-  add-port BRIDGE INTERFACE CONTAINER [--ipaddress="ADDRESS"]
+  add-port BRIDGE TYPE INTERFACE CONTAINER [--ipaddress="ADDRESS"]
                     [--gateway=GATEWAY] [--macaddress="MACADDRESS"]
                     [--mtu=MTU]
                     Adds INTERFACE inside CONTAINER and connects it as a port
@@ -207,13 +218,13 @@ Commands:
                     INTERFACE. ADDRESS can include a '/' to represent network
                     prefix length. Optionally, sets a GATEWAY, MACADDRESS
                     and MTU.  e.g.:
-                    ${UTIL} add-port br-int eth1 c474a0e2830e
+                    ${UTIL} add-port br-int ovs eth1 c474a0e2830e
                     --ipaddress=192.168.1.2/24 --gateway=192.168.1.1
 
-  del-port BRIDGE INTERFACE CONTAINER
+  del-port BRIDGE TYPE INTERFACE CONTAINER
                     Deletes INTERFACE inside CONTAINER and removes its
                     connection to Open vSwitch BRIDGE. e.g.:
-                    ${UTIL} del-port br-int eth1 c474a0e2830e
+                    ${UTIL} del-port br-int ovs eth1 c474a0e2830e
 
   recover CONTAINER [CONTAINER...]
                     Recover INTERFACES inside CONTAINERS after starting them
