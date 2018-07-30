@@ -1,14 +1,13 @@
 #!/bin/bash
 set -x
-CFG_PATH=/var/run/docker/net/
+CFG_PATH=/etc/docker/net/
 
 add_port () {
     BRIDGE=$1
-    TYPE=$2
-    INTERFACE=$3
-    CONTAINER=$4
+    INTERFACE=$2
+    CONTAINER=$3
 
-    if [ -z $BRIDGE ] || [ -z $TYPE ] || [ -z $INTERFACE ] || [ -z $CONTAINER ]
+    if [ -z $BRIDGE ] || [ -z $INTERFACE ] || [ -z $CONTAINER ]
     then
         echo "add-port: not enough arguments (use --help for help)"
         exit 1
@@ -32,23 +31,38 @@ add_port () {
         esac
     done
     
-
-    if [ x$TYPE == "xovs" ]
+    linux_br=FALSE
+    TYPE=linux
+    ovs-vsctl --version > /dev/null 2>&1
+    if [ $? -eq 0 ]
     then
         PORT=$(ovs-vsctl --data=bare --no-heading --columns=name find interface \
              external_ids:container_id=$CONTAINER external_ids:container_iface=$INTERFACE 2> /dev/null)
-        if [ ! -z $PORT ];
+        if [ ! -z $PORT ]
         then
             echo "Port '$INTERFACE' already exist"
             exit 1
         fi
-        ovs-vsctl --may-exist add-br $BRIDGE
-    else
-        brctl showmacs $BRIDGE
-        if [ $? != 0 ]
+
+        ovs-vsctl br-exists $BRIDGE
+        if [ $? -ne 0 ]
         then
-            brctl addbr $BRIDGE
+            linux_br=TRUE
+        else
+            TYPE=ovs
         fi
+#        ovs-vsctl --may-exist add-br $BRIDGE
+    else
+        brctl showmacs $BRIDGE > /dev/null 2&>1
+        if [ $? -ne 0 ]
+        then
+            linux_br=TRUE
+        fi
+    fi
+
+    if [ $linux_br == YES ]
+    then
+        brctl addbr $BRIDGE
     fi
 
     PID=$(docker inspect -f '{{.State.Pid}}' $CONTAINER);
@@ -62,7 +76,7 @@ add_port () {
         exit 1
     fi
 
-    mkdir -p /var/run/netns > /dev/null
+    mkdir -p /var/run/netns > /dev/null 2&>1
     if [ ! -e /var/run/netns/$PID ]
     then
         ln -s /proc/$PID/ns/net /var/run/netns/$PID
@@ -72,7 +86,7 @@ add_port () {
     PORTNAME="${ID:0:13}"
     ip link add "${PORTNAME}_l" type veth peer name "${PORTNAME}_c"
 
-    if [ x$TYPE == "xovs" ]
+    if [ $ovs_br == TRUE ]
     then
         ovs-vsctl --may-exist add-port $BRIDGE "$PORTNAME"_l -- set interface "$PORTNAME"_l \
         external_ids:container_id=$CONTAINER external_ids:container_iface=$INTERFACE
@@ -99,7 +113,19 @@ add_port () {
 
     if [ ${#GATEWAY} -ne 0 ]
     then
-        ip netns exec $PID ip route add default via $GATEWAY
+        if [ -e $CFG_PATH$CID ]
+        then
+            gw=$(awk -F, '{print $6}' $CFG_PATH$CID |grep -v '^$')
+            if [ ${#gw} -ne 0 ]
+            then
+                echo "Container '$CONTAINER' has set default route '$gw'."
+                echo "Address '$GATEWAY' would be ignored."
+            else
+                ip netns exec $PID ip route add default via $GATEWAY > /dev/null 2&>1
+            fi
+        else
+            ip netns exec $PID ip route add default via $GATEWAY > /dev/null 2&>1
+        fi
     fi
 
     echo $BRIDGE,$TYPE,$INTERFACE,"$PORTNAME"_l,$ADDRESS,$GATEWAY >> $CFG_PATH$CID
@@ -107,11 +133,10 @@ add_port () {
 
 del_port () {
     BRIDGE=$1
-    TYPE=$2
-    INTERFACE=$3
-    CONTAINER=$4
+    INTERFACE=$2
+    CONTAINER=$3
 
-    if [ -z $BRIDGE ] || [ -z $TYPE ] || [ -z $INTERFACE ] || [ -z $CONTAINER ]
+    if [ -z $BRIDGE ] || [ -z $INTERFACE ] || [ -z $CONTAINER ]
     then
         echo "del-port: not enough arguments (use --help for help)"
         exit 1
@@ -124,7 +149,7 @@ del_port () {
         exit 1
     fi
     OLD_IFS=$IFS
-    INFO=$(grep $BRIDGE,$TYPE,$INTERFACE $CFG_PATH$CID)
+    INFO=$(grep $BRIDGE,[a-z]\{3,5\},$INTERFACE $CFG_PATH$CID)
     if [ ${#INFO} -eq 0 ]
     then
         echo "Cannot find device '$INTERFACE' in container."
@@ -132,73 +157,66 @@ del_port () {
     fi
     IFS=","
     arr=($INFO)
+    TYPE=${arr[2]}
     PORT=${arr[3]}
     IFS=$OLD_IFS
-    if [ x$TYPE == "xovs" ]
+    if [ x$TYPE == x"ovs" ]
     then
         ovs-vsctl --if-exists del-port $BRIDGE $PORT > /dev/null
     else
         brctl delif $BRIDGE $PORT > /dev/null
     fi
-
+    sed -i "s/${arr[0]},${arr[1]},${arr[2]},${arr[3]}.*/d" $CFG_PATH$CID
     ip link delete $PORT
 }
 
 recover () {
     while [ $# -ne 0 ]; do
         CID=$(docker ps -a -f name=^/$1$ --format {{.ID}})
-        if [ ! ${#CID} -gt 0 ]
+        if [ ${#CID} -ne 0 ]
         then
-            cat $CFG_PATH$CID | while read line
+            mv -f $CFG_PATH$CID{,.bak}
+            cat $CFG_PATH$CID.bak | while read line
             do
                 OLD_IFS=$IFS
                 IFS=","
                 arr=($line)
-                add_port ${arr[0]} ${arr[1]} ${arr[2]} $1 --ipaddress=${arr[4]} --gateway=${arr[5]}
+                if [ ${arr[1]} == "ovs" ]
+                then
+                    ovs-vsctl --may-exist add-br $BRIDGE
+                fi
+                add_port ${arr[0]} ${arr[2]} $1 --ipaddress=${arr[4]} --gateway=${arr[5]}
                 IFS=$OLD_IFS
             done
+            rm -f $CFG_PATH$CID.bak
         fi
         shift
     done
 }
 
 clear () {
-    while [ $# -ne 0 ]
-    do
-        CID=$(docker ps -a -f name=^/$1$ --format {{.ID}})
-        if [ ${#CID} -ne 0 ]
-        then
-            cat $CFG_PATH$CID | while read line
-            do
-                OLD_IFS=$IFS
-                IFS=","
-                arr=($line)
-                if [ x${arr[1]} == "xovs" ]
-                then
-                    ovs-vsctl --if-exists del-port ${arr[0]} ${arr[3]} > /dev/null
-                else
-                    brctl delif ${arr[0]} ${arr[3]} > /dev/null
-                fi
-                ip link delete ${arr[3]}
-                IFS=$OLD_IFS
-            done
-        fi
-        shift
-    done
-
     for CID in `ls $CFG_PATH`
     do
-        Name=$(docker ps -a -f id=$CID --format {{.Names}})
-        if [ ${#Name} -eq 0 ]
+        name=$(docker ps -a -f id=$CID --format {{.Names}})
+        status=$(docker ps -a -f id=$CID --format {{.Status}})
+        cat $CFG_PATH$CID | while read line
+        do
+            OLD_IFS=$IFS
+            IFS=","
+            arr=($line)
+            
+            if [ ${#name} -eq 0 ] || [[ $status == Exited* ]]
+            then
+                if [ x${arr[1]} == x"ovs" ]
+                then
+                    ovs-vsctl --if-exists del-port ${arr[0]} ${arr[3]} > /dev/null 2>&1
+                fi
+            fi
+            IFS=$OLD_IFS
+        done
+
+        if [ ${#name} -eq 0 ]
         then
-            cat $CFG_PATH$CID | while read line
-            do
-                OLD_IFS=$IFS
-                IFS=","
-                arr=($line)
-                del_port ${arr[0]} ${arr[1]} ${arr[2]} $1
-                IFS=$OLD_IFS
-            done
             rm -f $CFG_PATH$CID
         fi
     done
@@ -210,21 +228,20 @@ ${UTIL}: Performs integration of Open vSwitch with Docker.
 usage: ${UTIL} COMMAND
 
 Commands:
-  add-port BRIDGE TYPE INTERFACE CONTAINER [--ipaddress="ADDRESS"]
-                    [--gateway=GATEWAY] [--macaddress="MACADDRESS"]
-                    [--mtu=MTU]
+  add-port BRIDGE INTERFACE CONTAINER [--ipaddress="ADDRESS"] [--gateway=GATEWAY]
                     Adds INTERFACE inside CONTAINER and connects it as a port
                     in Open vSwitch BRIDGE. Optionally, sets ADDRESS on
                     INTERFACE. ADDRESS can include a '/' to represent network
-                    prefix length. Optionally, sets a GATEWAY, MACADDRESS
-                    and MTU.  e.g.:
-                    ${UTIL} add-port br-int ovs eth1 c474a0e2830e
+                    prefix length. Optionally, sets a GATEWAY.
+                    If there is no bridge, ${UTIL} would create a linux bridge.
+                    e.g.:
+                    ${UTIL} add-port br-int eth1 c474a0e2830e
                     --ipaddress=192.168.1.2/24 --gateway=192.168.1.1
 
-  del-port BRIDGE TYPE INTERFACE CONTAINER
+  del-port BRIDGE INTERFACE CONTAINER
                     Deletes INTERFACE inside CONTAINER and removes its
                     connection to Open vSwitch BRIDGE. e.g.:
-                    ${UTIL} del-port br-int ovs eth1 c474a0e2830e
+                    ${UTIL} del-port br-int eth1 c474a0e2830e
 
   recover CONTAINER [CONTAINER...]
                     Recover INTERFACES inside CONTAINERS after starting them
@@ -261,12 +278,12 @@ case $1 in
         ;;
     "clear")
         shift
-        clear
+        clear "$@"
         exit 0
         ;;
     "recover")
         shift
-        recover
+        recover "$@"
         exit 0
         ;;
     -h | --help)
