@@ -248,7 +248,7 @@ Commands:
                     in Open vSwitch BRIDGE. Optionally, sets ADDRESS on
                     INTERFACE. ADDRESS can include a '/' to represent network
                     prefix length. Optionally, sets a GATEWAY.
-                    If there is no bridge, ${UTIL} would create a linux bridge.
+                    If there is no bridge named BRIDGE, ${UTIL} would create a linux bridge.
                     e.g.:
                     ${UTIL} add-port br-int eth1 c474a0e2830e
                     --ipaddress=192.168.1.2/24 --gateway=192.168.1.1
