@@ -2,6 +2,21 @@
 set -x
 CFG_PATH=/etc/docker/net/
 
+# Check for programs we'll need.
+search_path () {
+    save_IFS=$IFS
+    IFS=:
+    for dir in $PATH; do
+        IFS=$save_IFS
+        if test -x "$dir/$1"; then
+            return 0
+        fi
+    done
+    IFS=$save_IFS
+    echo >&2 "$0: $1 not found in \$PATH, please install and try again"
+    exit 1
+}
+
 add_port () {
     BRIDGE=$1
     INTERFACE=$2
@@ -224,7 +239,7 @@ clear () {
 
 usage() {
     cat << EOF
-${UTIL}: Performs integration of Open vSwitch with Docker.
+${UTIL}: Performs integration of Linux bridge and ovs bridge with Docker.
 usage: ${UTIL} COMMAND
 
 Commands:
@@ -243,18 +258,16 @@ Commands:
                     connection to Open vSwitch BRIDGE. e.g.:
                     ${UTIL} del-port br-int eth1 c474a0e2830e
 
-  recover CONTAINER [CONTAINER...]
-                    Recover INTERFACES inside CONTAINERS after starting them
-
-  clear CONTAINER [CONTAINER...]
-                    Clear INTERFACES inside CONTAINERS after stopping or delete them
-
 Options:
   -h, --help        display this help message.
 EOF
 }
 
 UTIL=$(basename $0)
+search_path ovs-vsctl
+search_path docker
+search_path uuidgen
+
 if (ip netns) > /dev/null 2>&1; then :; else
     echo "ip utility not found (or it does not support netns), cannot proceed"
     exit 1
