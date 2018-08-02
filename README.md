@@ -1,3 +1,5 @@
+dctl
+=======
 Command dctl use for container add port or delete port.
 Modified base on command ovs-docker in project ovs(https://github.com/openvswitch/ovs.git).
 
@@ -5,15 +7,17 @@ Added linux bridge supporting(default).
 Added ip address recording and if container restart, the inner ports would be added automatically.
 Deleted vlan and mtu option.
 
-INSTALL:
-In project directory, execute:
-chmod +x install.sh
+Install:
+-
+In project directory, execute:  
+chmod +x install.sh  
 ./install.sh
 
-USEAGE:
-dctl  add-port BRIDGE INTERFACE CONTAINER [--ipaddress=ADDRESS] [--gateway=GATEWAY]
+Useage:
+-
+dctl  add-port BRIDGE INTERFACE CONTAINER [--ipaddress=ADDRESS] [--gateway=GATEWAY]  
 
-                    Adds INTERFACE inside CONTAINER and connects it as a port
+                    Adds INTERFACE inside CONTAINER and connects it as a port  
                     in Open vSwitch BRIDGE. Optionally, sets ADDRESS on
                     INTERFACE. ADDRESS can include a '/' to represent network
                     prefix length. Optionally, sets a GATEWAY.
@@ -34,5 +38,6 @@ dctl  -h, --help
                     display this help message.
 
 
-WARNING:
+Warning:
+-
 The option clear/recover use for invoking automatically when starting container, don't use them initiatively. 
