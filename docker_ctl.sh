@@ -75,7 +75,7 @@ add_port () {
         fi
     fi
 
-    if [ $linux_br == YES ]
+    if [ $linux_br == TRUE ]
     then
         brctl addbr $BRIDGE
     fi
@@ -101,7 +101,7 @@ add_port () {
     PORTNAME="${ID:0:13}"
     ip link add "${PORTNAME}_l" type veth peer name "${PORTNAME}_c"
 
-    if [ $ovs_br == TRUE ]
+    if [ $TYPE == "ovs" ]
     then
         ovs-vsctl --may-exist add-port $BRIDGE "$PORTNAME"_l -- set interface "$PORTNAME"_l \
         external_ids:container_id=$CONTAINER external_ids:container_iface=$INTERFACE
