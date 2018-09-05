@@ -1,5 +1,5 @@
 #!/bin/bash
-set -x
+
 CFG_PATH=/etc/docker/net/
 
 # Check for programs we'll need.
