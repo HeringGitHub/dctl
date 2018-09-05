@@ -28,7 +28,7 @@ add_port () {
         exit 1
     fi
 
-    shift 4
+    shift 3
     while [ $# -ne 0 ]; do
         case $1 in
             --ipaddress=*)
