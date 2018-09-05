@@ -77,7 +77,7 @@ add_port () {
 
     if [ $linux_br == TRUE ]
     then
-        brctl addbr $BRIDGE
+        brctl addbr $BRIDGE > /dev/null 2&>1
     fi
 
     PID=$(docker inspect -f '{{.State.Pid}}' $CONTAINER);
@@ -111,7 +111,7 @@ add_port () {
     ip link set "$PORTNAME"_l up
 
     ip link set "$PORTNAME"_c netns $PID
-    ip netns exec $PID ip link set dev "$PORTNAME"_c name $INTERFACE
+    ip netns exec $PID ip link set dev "$PORTNAME"_c name $INTERFACE > /dev/null 2&>1
     ip netns exec $PID ip link set $INTERFACE up
 
     CID=$(docker ps -a -f name=^/$CONTAINER$ --format {{.ID}})
@@ -198,7 +198,7 @@ recover () {
                 arr=($line)
                 if [ ${arr[1]} == "ovs" ]
                 then
-                    ovs-vsctl --may-exist add-br $BRIDGE
+                    ovs-vsctl --may-exist add-br ${arr[0]}
                 fi
                 add_port ${arr[0]} ${arr[2]} $1 --ipaddress=${arr[4]} --gateway=${arr[5]}
                 IFS=$OLD_IFS
@@ -264,7 +264,7 @@ EOF
 }
 
 UTIL=$(basename $0)
-search_path ovs-vsctl
+#search_path ovs-vsctl
 search_path docker
 search_path uuidgen
 
