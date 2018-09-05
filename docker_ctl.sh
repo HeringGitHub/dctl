@@ -111,7 +111,7 @@ add_port () {
     ip link set "$PORTNAME"_l up
 
     ip link set "$PORTNAME"_c netns $PID
-    ip netns exec $PID ip link set dev "$PORTNAME"_c name $INTERFACE > /dev/null 2&>1
+    ip netns exec $PID ip link set dev "$PORTNAME"_c name $INTERFACE
     ip netns exec $PID ip link set $INTERFACE up
 
     CID=$(docker ps -a -f name=^/$CONTAINER$ --format {{.ID}})
@@ -136,10 +136,10 @@ add_port () {
                 echo "Container '$CONTAINER' has set default route '$gw'."
                 echo "Address '$GATEWAY' would be ignored."
             else
-                ip netns exec $PID ip route add default via $GATEWAY > /dev/null 2&>1
+                ip netns exec $PID ip route add default via $GATEWAY
             fi
         else
-            ip netns exec $PID ip route add default via $GATEWAY > /dev/null 2&>1
+            ip netns exec $PID ip route add default via $GATEWAY
         fi
     fi
 
@@ -224,7 +224,7 @@ clear () {
             then
                 if [ x${arr[1]} == x"ovs" ]
                 then
-                    ovs-vsctl --if-exists del-port ${arr[0]} ${arr[3]} > /dev/null 2>&1
+                    ovs-vsctl --if-exists del-port ${arr[0]} ${arr[3]}
                 fi
             fi
             IFS=$OLD_IFS
